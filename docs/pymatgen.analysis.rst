@@ -6,9 +6,11 @@ Subpackages
 
 .. toctree::
 
+    pymatgen.analysis.chemenv
     pymatgen.analysis.cost
     pymatgen.analysis.defects
     pymatgen.analysis.diffraction
+    pymatgen.analysis.elasticity
     pymatgen.analysis.hhi
     pymatgen.analysis.pourbaix
 
@@ -63,6 +65,22 @@ pymatgen.analysis.molecule_structure_comparator module
     :undoc-members:
     :show-inheritance:
 
+pymatgen.analysis.nmr module
+----------------------------
+
+.. automodule:: pymatgen.analysis.nmr
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+pymatgen.analysis.piezo module
+------------------------------
+
+.. automodule:: pymatgen.analysis.piezo
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 pymatgen.analysis.reaction_calculator module
 --------------------------------------------
 
@@ -83,6 +101,14 @@ pymatgen.analysis.structure_matcher module
 ------------------------------------------
 
 .. automodule:: pymatgen.analysis.structure_matcher
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+pymatgen.analysis.substrate_analyzer module
+-------------------------------------------
+
+.. automodule:: pymatgen.analysis.substrate_analyzer
     :members:
     :undoc-members:
     :show-inheritance:

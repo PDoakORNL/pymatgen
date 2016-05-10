@@ -8,34 +8,41 @@ be available on `PyPI <http://pypi.python.org>`_.
 1. Python 2.7-3.x supported. All critical dependencies of pymatgen already
    have Python 3.x support. Only a few optional dependencies (VTK and ASE) do
    not. If you do not need those features, you can choose to work with Python 3.
-2. numpy: For array, matrix and other numerical manipulations. Used extensively
-   by all core modules.
-3. pyhull 1.5.2+: For generation of phase diagrams.
-4. requests 2.0+: For the high-level interface to the Materials API.
-5. monty 0.4.2+: For some common complementary functions,
-   design patterns (e.g., singleton) and decorators to the Python
-   standard library.
+2. numpy>=1.9
+3. scipy>0.14
+4. monty>=0.7.0
+5. requests 2.0+
+6. pybtex
+7. pyyaml
+8. tabulate
+9. six
+
+Most of these are fairly easy to install. The well-established numpy and scipy
+should have ready-made installation packages for all platforms. The rest are
+pure/semi-pure Python packages that installs without any issues with pip and
+easy_install.
 
 Optional dependencies
 ---------------------
 
-Optional libraries that are required if you need certain features:
+Optional libraries that are required if you need certain features.
 
-1. scipy 0.10+ (highly recommended): For use in Gaussian smearing and faster
-   Phase Diagrams.
+1. pyhull 1.5.2+ (highly recommended): For electronic structure, generation of
+   Pourbaix diagrams.
 2. matplotlib 1.1+ (highly recommended): For plotting (e.g., Phase Diagrams).
-3. VTK with Python bindings 5.8+ (http://www.vtk.org/): For visualization of
+3. sympy (highly recommended): For defect generation and analysis.
+4. VTK with Python bindings 5.8+ (http://www.vtk.org/): For visualization of
    crystal structures using the pymatgen.vis package. Note that the VTK
    package is incompatible with Python 3.x at the moment.
-4. Atomistic Simulation Environment or ASE 3.6+: Required for the usage of the
+5. Atomistic Simulation Environment or ASE 3.6+: Required for the usage of the
    adapters in pymatgen.io.aseio between pymatgen's core Structure object and
    the Atoms object used by ASE. Get it at https://wiki.fysik.dtu.dk/ase/.
    Note that the ASE package is incompatible with Python 3.x at the moment.
-5. OpenBabel with Python bindings (http://openbabel.org): Required for the
+6. OpenBabel with Python bindings (http://openbabel.org): Required for the
    usage of the adapters in pymatgen.io.babelio between pymatgen's Molecule
    and OpenBabel's OBMol. Opens up input and output support for the very large
    number of input and output formats supported by OpenBabel.
-6. nose - For unittesting. Not optional for developers.
+7. nose - For unittesting. Not optional for developers.
 
 Optional non-Python programs
 ----------------------------
@@ -192,12 +199,30 @@ POTCAR Setup
 
 For the code to generate POTCAR files, it needs to know where the VASP
 pseudopotential files are.  We are not allowed to distribute these under the
-VASP license. The good news is that we have included a setup script to help you
-along.
+VASP license. The good news is that the `pmg` command line utility includes a
+setup functionality.
 
 After installation, do::
 
-    potcar_setup.py
+    pmg setup --input_potcar_dir <EXTRACTED_VASP_POTCAR> --output_potcar_dir <MY_PSP>
+
+In the above, `<EXTRACTED_VASP_POTCAR>` is the location of the directory that
+you extracted the downloaded VASP pseudopotential files. Typically, it has
+the following format::
+
+    - <EXTRACTED_VASP_POTCAR>
+    |- POT_GGA_PAW_PBE
+    ||- Ac_s
+    |||-POTCAR
+    |||-...
+
+or::
+
+    - <EXTRACTED_VASP_POTCAR>
+    |- potpaw_PBE
+    ||- Ac_s
+    |||-POTCAR
+    |||-...
 
 and follow the instructions. If you have done it correctly, you should get a
 resources directory with the following directory structure::
@@ -213,7 +238,8 @@ resources directory with the following directory structure::
 
 After generating the resources directory, you should add a VASP_PSP_DIR
 environment variable pointing to the generated directory and you should then be
-able to generate POTCARs.
+able to generate POTCARs. The setup also provides options to do this
+automatically and setup for Materials API usage as well.
 
 Setup for Developers (using GitHub)
 ===================================
@@ -387,34 +413,64 @@ Here are the steps that I took to make it work:
 
         export PYTHONPATH=/usr/local/lib:$PYTHONPATH
 
-Enumlib (tested as of version of Jul 2012)
+Enumlib (updated Mar 2016)
 ------------------------------------------
 
-Mac OS X 10.7 - 10.9
-~~~~~~~~~~~~~~~~~~~~
+The author now has his own Github repo with the relevant instructions to
+compile a newer version of enumlib. Follow the instructions given at the
+`enumlib repo <https://github.com/msg-byu/enumlib>`_.
 
-There does not seem to be any issues with installation as per the instructions
-given by the author. For convenience, the steps are reproduced here:
+Zeo++
+-----
 
-::
+If you use the defects analysis package, you will need to installZeo++/Voro++.
+Here are the steps you need to follow (thanks to Bharat)
 
-   tar -zxvf enum.tar.gz
+Download and install Voro++::
 
-   #Compile the symmetry library. Go to the celib/trunk directory:
-   cd celib/trunk
+    mkdir Voro++
+    mkdir Voro++/voro
+    cd Voro++/voro
+    svn checkout --username anonsvn https://code.lbl.gov/svn/voro/trunk  # password is 'anonsvn'
+    cd trunk
 
-   #Set an environment variable to identify your fortran compiler
-   export F90=gfortran
+Add -fPIC to the CFLAGS variable in config.mk, and then::
 
-   make
+    make
 
-   Next, make the enumeration library
-   cd ../../enumlib/trunk
-   make
+Download and install Zeo++::
 
-   # Make the necessary standalone executables
-   make multienum.x
-   make makestr.x
+    mkdir Zeo++
+    mkdir Zeo++/zeo
+    cd Zeo++/zeo
+    svn checkout --username anonsvn https://code.lbl.gov/svn/zeo/trunk  # password is 'anonsvn'
+    cd trunk
+    make dylib
 
-After doing the above, make sure that the multienum.x and makestr.x executables
-are available in your path.
+Create python bindings with Cython::
+
+    pip install cython
+    cd cython_wrapper
+    python setup_alt.py develop
+
+To test that the installation worked, here is an example series of things you
+can do using pymatgen::
+
+    In [1]: from pymatgen.analysis.defects.point_defects import Interstitial
+
+    In [2]: from pymatgen.core.structure import Structure
+
+    In [3]: structure = Structure.from_file('/path/to/file')
+
+    In [4]: radii, valences = {}, {}
+
+    In [5]: for element in structure.composition.elements:
+       ...:     radii[element.symbol] = element.atomic_radius
+       ...:     valence = element.group  # Just a first guess..
+       ...:     if element.group > 12:
+       ...:         valence -= 10
+       ...:     valences[element.symbol] = valence
+
+    In [6]: interstitial = Interstitial(structure, radii=radii, valences=valences)
+
+    In [7]: interstitial._defect_sites

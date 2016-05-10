@@ -34,11 +34,12 @@ from monty.io import zopen
 from monty.os.path import zpath
 from monty.json import MontyDecoder
 
+from enum import Enum
 from tabulate import tabulate
 
+import scipy.constants as const
+
 from pymatgen.core.lattice import Lattice
-from pymatgen.core.physical_constants import BOLTZMANN_CONST
-from pymatgen.core.design_patterns import Enum
 from pymatgen.core.structure import Structure
 from pymatgen.core.periodic_table import Element, get_el_sp
 from monty.design_patterns import cached_class
@@ -96,8 +97,14 @@ class Poscar(MSONable):
 
     .. attribute:: predictor_corrector
 
-        Predictor corrector coordinates for each site (typically read in from a
-        MD CONTCAR).
+        Predictor corrector coordinates and derivatives for each site; i.e.
+        a list of three 1x3 arrays for each site (typically read in from a MD CONTCAR).
+
+    .. attribute:: predictor_corrector_preamble
+
+        Predictor corrector preamble contains the predictor-corrector key, POTIM,
+        and thermostat parameters that precede the site-specic predictor corrector
+        data in MD CONTCAR
 
     .. attribute:: temperature
 
@@ -106,19 +113,51 @@ class Poscar(MSONable):
     """
 
     def __init__(self, structure, comment=None, selective_dynamics=None,
-                 true_names=True, velocities=None, predictor_corrector=None):
+                 true_names=True, velocities=None, predictor_corrector=None,
+                 predictor_corrector_preamble=None):
         if structure.is_ordered:
-            self.structure = structure
+            site_properties = {}
+            if selective_dynamics:
+                site_properties["selective_dynamics"] = selective_dynamics
+            if velocities:
+                site_properties["velocities"] = velocities
+            if predictor_corrector:
+                site_properties["predictor_corrector"] = predictor_corrector
+            self.structure = structure.copy(site_properties=site_properties)
             self.true_names = true_names
-            self.selective_dynamics = selective_dynamics
             self.comment = structure.formula if comment is None else comment
-            self.velocities = velocities
-            self.predictor_corrector = predictor_corrector
+            self.predictor_corrector_preamble = predictor_corrector_preamble
         else:
             raise ValueError("Structure with partial occupancies cannot be "
                              "converted into POSCAR!")
 
         self.temperature = -1
+
+    @property
+    def velocities(self):
+        return self.structure.site_properties.get("velocities")
+
+    @property
+    def selective_dynamics(self):
+        return self.structure.site_properties.get("selective_dynamics")
+
+    @property
+    def predictor_corrector(self):
+        return self.structure.site_properties.get("predictor_corrector")
+
+    @velocities.setter
+    def velocities(self, velocities):
+        self.structure.add_site_property("velocities", velocities)
+
+    @selective_dynamics.setter
+    def selective_dynamics(self, selective_dynamics):
+        self.structure.add_site_property("selective_dynamics",
+                                         selective_dynamics)
+
+    @predictor_corrector.setter
+    def predictor_corrector(self, predictor_corrector):
+        self.structure.add_site_property("predictor_corrector",
+                                         predictor_corrector)
 
     @property
     def site_symbols(self):
@@ -147,12 +186,6 @@ class Poscar(MSONable):
                     raise ValueError(name + " array must be same length as" +
                                      " the structure.")
                 value = value.tolist()
-        elif name == "structure":
-            #If we set a new structure, we should discard the velocities and
-            #predictor_corrector and selective dynamics.
-            self.velocities = None
-            self.predictor_corrector = None
-            self.selective_dynamics = None
         super(Poscar, self).__setattr__(name, value)
 
     @staticmethod
@@ -329,17 +362,32 @@ class Poscar(MSONable):
             for line in chunks[1].strip().split("\n"):
                 velocities.append([float(tok) for tok in line.split()])
 
+        # Parse the predictor-corrector data
         predictor_corrector = []
+        predictor_corrector_preamble = None
+
         if len(chunks) > 2:
             lines = chunks[2].strip().split("\n")
-            predictor_corrector.append([int(lines[0])])
-            for line in lines[1:]:
-                predictor_corrector.append([float(tok)
-                                            for tok in line.split()])
+            # There are 3 sets of 3xN Predictor corrector parameters
+            # So can't be stored as a single set of "site_property"
+
+            # First line in chunk is a key in CONTCAR
+            # Second line is POTIM
+            # Third line is the thermostat parameters
+            predictor_corrector_preamble = lines[0] + "\n" + lines[1]+"\n" + lines[2]
+            # Rest is three sets of parameters, each set contains
+            # x, y, z predictor-corrector parameters for every atom in orde
+            lines = lines[3:]
+            for st in range(nsites):
+                d1 = [float(tok) for tok in lines[st].split()]
+                d2 = [float(tok) for tok in lines[st+nsites].split()]
+                d3 = [float(tok) for tok in lines[st+2*nsites].split()]
+                predictor_corrector.append([d1,d2,d3])
 
         return Poscar(struct, comment, selective_dynamics, vasp5_symbols,
                       velocities=velocities,
-                      predictor_corrector=predictor_corrector)
+                      predictor_corrector=predictor_corrector,
+                      predictor_corrector_preamble=predictor_corrector_preamble)
 
     def get_string(self, direct=True, vasp4_compatible=False,
                    significant_figures=6):
@@ -395,10 +443,15 @@ class Poscar(MSONable):
 
         if self.predictor_corrector:
             lines.append("")
-            lines.append(str(self.predictor_corrector[0][0]))
-            lines.append(str(self.predictor_corrector[1][0]))
-            for v in self.predictor_corrector[2:]:
-                lines.append(" ".join([format_str.format(i) for i in v]))
+            if self.predictor_corrector_preamble:
+                lines.append(self.predictor_corrector_preamble)
+                pred = np.array(self.predictor_corrector)
+                for col in range(3):
+                    for z in pred[:,col]:
+                        lines.append(" ".join([format_str.format(i) for i in z]))
+            else:
+                warnings.warn("Preamble information missing or corrupt. " +
+                              "Writing Poscar with no predictor corrector data.")
 
         return "\n".join(lines) + "\n"
 
@@ -473,16 +526,24 @@ class Poscar(MSONable):
         #scale velocities to get correct temperature
         energy = np.sum(1 / 2 * atomic_masses *
                         np.sum(velocities ** 2, axis=1))
-        scale = (temperature * dof / (2 * energy / BOLTZMANN_CONST)) ** (1 / 2)
+        scale = (temperature * dof / (2 * energy / const.k)) ** (1 / 2)
 
         velocities *= scale * 1e-5  # these are in A/fs
 
         self.temperature = temperature
-        self.selective_dynamics = None
-        self.predictor_corrector = None
+        try:
+            del self.structure.site_properties["selective_dynamics"]
+        except KeyError:
+            pass
+
+        try:
+            del self.structure.site_properties["predictor_corrector"]
+        except KeyError:
+            pass
         # returns as a list of lists to be consistent with the other
         # initializations
-        self.velocities = velocities.tolist()
+
+        self.structure.add_site_property("velocities", velocities.tolist())
 
 
 class Incar(dict, MSONable):
@@ -500,6 +561,12 @@ class Incar(dict, MSONable):
         """
         super(Incar, self).__init__()
         if params:
+            if params.get("MAGMOM") and (params.get("LSORBIT") or \
+                    params.get("LNONCOLLINEAR")):
+                val = []
+                for i in range(len(params["MAGMOM"])//3):
+                    val.append(params["MAGMOM"][i*3:(i+1)*3])
+                params["MAGMOM"] = val
             self.update(params)
 
     def __setitem__(self, key, val):
@@ -542,8 +609,15 @@ class Incar(dict, MSONable):
         for k in keys:
             if k == "MAGMOM" and isinstance(self[k], list):
                 value = []
-                for m, g in itertools.groupby(self[k]):
-                    value.append("{}*{}".format(len(tuple(g)), m))
+                if isinstance(self[k][0], list) and (self.get("LSORBIT") or \
+                        self.get("LNONCOLLINEAR")):
+                    value.append(" ".join(str(i) for j in self[k] for i in j))
+                elif self.get("LSORBIT") or self.get("LNONCOLLINEAR"):
+                    for m, g in itertools.groupby(self[k]):
+                        value.append("3*{}*{}".format(len(tuple(g)), m))
+                else:
+                    for m, g in itertools.groupby(self[k]):
+                        value.append("{}*{}".format(len(tuple(g)), m))
                 lines.append([k, " ".join(value)])
             elif isinstance(self[k], list):
                 lines.append([k, " ".join([str(i) for i in self[k]])])
@@ -617,7 +691,7 @@ class Incar(dict, MSONable):
         """
         list_keys = ("LDAUU", "LDAUL", "LDAUJ", "MAGMOM")
         bool_keys = ("LDAU", "LWAVE", "LSCALU", "LCHARG", "LPLANE",
-                     "LHFCALC", "ADDGRID")
+                     "LHFCALC", "ADDGRID", "LSORBIT", "LNONCOLLINEAR")
         float_keys = ("EDIFF", "SIGMA", "TIME", "ENCUTFOCK", "HFSCREEN",
                       "POTIM", "EDIFFG")
         int_keys = ("NSW", "NBANDS", "NELMIN", "ISIF", "IBRION", "ISPIN",
@@ -633,13 +707,13 @@ class Incar(dict, MSONable):
         try:
             if key in list_keys:
                 output = []
-                toks = re.findall(r"(-?\d+\.?\d*)\*?(-?\d+\.?\d*)?", val)
-
+                toks = re.findall(r"(-?\d+\.?\d*)\*?(-?\d+\.?\d*)?\*?(-?\d+\.?\d*)?", val)
                 for tok in toks:
-                    if tok[1]:
-
-                        output.extend([smart_int_or_float(tok[1])]
-                                      * int(tok[0]))
+                    if tok[2] and "3" in tok[0]:
+                        output.extend(
+                            [smart_int_or_float(tok[2])] * int(tok[0]) * int(tok[1]))
+                    elif tok[1]:
+                        output.extend([smart_int_or_float(tok[1])] * int(tok[0]))
                     else:
                         output.append(smart_int_or_float(tok[0]))
                 return output
@@ -732,12 +806,31 @@ class Incar(dict, MSONable):
         return Incar(params)
 
 
+class Kpoints_supported_modes(Enum):
+    Automatic = 0
+    Gamma = 1
+    Monkhorst = 2
+    Line_mode = 3
+    Cartesian = 4
+    Reciprocal = 5
+
+    def __str__(self):
+        return self.name
+
+    @staticmethod
+    def from_string(s):
+        c = s.lower()[0]
+        for m in Kpoints_supported_modes:
+            if m.name.lower()[0] == c:
+                return m
+        raise ValueError("Can't interprete Kpoint mode %s" % s)
+
+
 class Kpoints(MSONable):
     """
     KPOINT reader/writer.
     """
-    supported_modes = Enum(("Gamma", "Monkhorst", "Automatic", "Line_mode",
-                            "Cartesian", "Reciprocal"))
+    supported_modes = Kpoints_supported_modes
 
     def __init__(self, comment="Default gamma", num_kpts=0,
                  style=supported_modes.Gamma,
@@ -787,24 +880,36 @@ class Kpoints(MSONable):
         if num_kpts > 0 and (not labels) and (not kpts_weights):
             raise ValueError("For explicit or line-mode kpoints, either the "
                              "labels or kpts_weights must be specified.")
-        if style in (Kpoints.supported_modes.Automatic,
-                     Kpoints.supported_modes.Gamma,
-                     Kpoints.supported_modes.Monkhorst) and len(kpts) > 1:
-            raise ValueError("For fully automatic or automatic gamma or monk "
-                             "kpoints, only a single line for the number of "
-                             "divisions is allowed.")
 
         self.comment = comment
         self.num_kpts = num_kpts
+        self.kpts = kpts
         self.style = style
         self.coord_type = coord_type
-        self.kpts = kpts
         self.kpts_weights = kpts_weights
         self.kpts_shift = kpts_shift
         self.labels = labels
         self.tet_number = tet_number
         self.tet_weight = tet_weight
         self.tet_connections = tet_connections
+
+    @property
+    def style(self):
+        return self._style
+
+    @style.setter
+    def style(self, style):
+        if isinstance(style, six.string_types):
+            style = Kpoints.supported_modes.from_string(style)
+
+        if style in (Kpoints.supported_modes.Automatic,
+                     Kpoints.supported_modes.Gamma,
+                     Kpoints.supported_modes.Monkhorst) and len(self.kpts) > 1:
+            raise ValueError("For fully automatic or automatic gamma or monk "
+                             "kpoints, only a single line for the number of "
+                             "divisions is allowed.")
+
+        self._style = style
 
     @staticmethod
     def automatic(subdivisions):
@@ -934,7 +1039,7 @@ class Kpoints(MSONable):
         mult = (ngrid * lengths[0] * lengths[1] * lengths[2]) ** (1 / 3)
         num_div = [int(round(mult / l)) for l in lengths]
 
-        #ensure that numDiv[i] > 0
+        # ensure that numDiv[i] > 0
         num_div = [i if i > 0 else 1 for i in num_div]
 
         # VASP documentation recommends to use even grids for n <= 8 and odd
@@ -1037,14 +1142,14 @@ class Kpoints(MSONable):
         num_kpts = int(lines[1].split()[0].strip())
         style = lines[2].lower()[0]
 
-        #Fully automatic KPOINTS
+        # Fully automatic KPOINTS
         if style == "a":
             return Kpoints.automatic(int(lines[3]))
 
         coord_pattern = re.compile("^\s*([\d+\.\-Ee]+)\s+([\d+\.\-Ee]+)\s+"
                                    "([\d+\.\-Ee]+)")
 
-        #Automatic gamma and Monk KPOINTS, with optional shift
+        # Automatic gamma and Monk KPOINTS, with optional shift
         if style == "g" or style == "m":
             kpts = [int(i) for i in lines[3].split()]
             kpts_shift = (0, 0, 0)
@@ -1056,7 +1161,7 @@ class Kpoints(MSONable):
             return Kpoints.gamma_automatic(kpts, kpts_shift) if style == "g" \
                 else Kpoints.monkhorst_automatic(kpts, kpts_shift)
 
-        #Automatic kpoints with basis
+        # Automatic kpoints with basis
         if num_kpts <= 0:
             style = Kpoints.supported_modes.Cartesian if style in "ck" \
                 else Kpoints.supported_modes.Reciprocal
@@ -1065,7 +1170,7 @@ class Kpoints(MSONable):
             return Kpoints(comment=comment, num_kpts=num_kpts, style=style,
                            kpts=kpts, kpts_shift=kpts_shift)
 
-        #Line-mode KPOINTS, usually used with band structures
+        # Line-mode KPOINTS, usually used with band structures
         if style == "l":
             coord_type = "Cartesian" if lines[3].lower()[0] in "ck" \
                 else "Reciprocal"
@@ -1084,7 +1189,7 @@ class Kpoints(MSONable):
             return Kpoints(comment=comment, num_kpts=num_kpts, style=style,
                            kpts=kpts, coord_type=coord_type, labels=labels)
 
-        #Assume explicit KPOINTS if all else fails.
+        # Assume explicit KPOINTS if all else fails.
         style = Kpoints.supported_modes.Cartesian if style in "ck" \
             else Kpoints.supported_modes.Reciprocal
         kpts = []
@@ -1117,7 +1222,8 @@ class Kpoints(MSONable):
         except IndexError:
             pass
 
-        return Kpoints(comment=comment, num_kpts=num_kpts, style=style,
+        return Kpoints(comment=comment, num_kpts=num_kpts,
+                       style=Kpoints.supported_modes[str(style)],
                        kpts=kpts, kpts_weights=kpts_weights,
                        tet_number=tet_number, tet_weight=tet_weight,
                        tet_connections=tet_connections, labels=labels)
@@ -1133,8 +1239,8 @@ class Kpoints(MSONable):
             f.write(self.__str__())
 
     def __str__(self):
-        lines = [self.comment, str(self.num_kpts), self.style]
-        style = self.style.lower()[0]
+        lines = [self.comment, str(self.num_kpts), self.style.name]
+        style = self.style.name.lower()[0]
         if style == "l":
             lines.append(self.coord_type)
         for i in range(len(self.kpts)):
@@ -1150,7 +1256,7 @@ class Kpoints(MSONable):
                 else:
                     lines[-1] += " %i" % (self.kpts_weights[i])
 
-        #Print tetrahedron parameters if the number of tetrahedrons > 0
+        # Print tetrahedron parameters if the number of tetrahedrons > 0
         if style not in "lagm" and self.tet_number > 0:
             lines.append("Tetrahedron")
             lines.append("%d %f" % (self.tet_number, self.tet_weight))
@@ -1159,7 +1265,7 @@ class Kpoints(MSONable):
                                                  vertices[1], vertices[2],
                                                  vertices[3]))
 
-        #Print shifts for automatic kpoints types if not zero.
+        # Print shifts for automatic kpoints types if not zero.
         if self.num_kpts <= 0 and tuple(self.kpts_shift) != (0, 0, 0):
             lines.append(" ".join([str(x) for x in self.kpts_shift]))
         return "\n".join(lines) + "\n"
@@ -1167,7 +1273,7 @@ class Kpoints(MSONable):
     def as_dict(self):
         """json friendly dict representation of Kpoints"""
         d = {"comment": self.comment, "nkpoints": self.num_kpts,
-             "generation_style": self.style, "kpoints": self.kpts,
+             "generation_style": self.style.name, "kpoints": self.kpts,
              "usershift": self.kpts_shift,
              "kpts_weights": self.kpts_weights, "coord_type": self.coord_type,
              "labels": self.labels, "tet_number": self.tet_number,
@@ -1189,7 +1295,6 @@ class Kpoints(MSONable):
         kpts = d.get("kpoints", [[1, 1, 1]])
         kpts_shift = d.get("usershift", [0, 0, 0])
         num_kpts = d.get("nkpoints", 0)
-        #coord_type = d.get("coord_type", None)
         return cls(comment=comment, kpts=kpts, style=generation_style,
                    kpts_shift=kpts_shift, num_kpts=num_kpts,
                    kpts_weights=d.get("kpts_weights"),
@@ -1252,8 +1357,15 @@ class PotcarSingle(object):
         accessible as attributes in themselves. E.g., potcar.enmax,
         potcar.encut, etc.
     """
-    functional_dir = {"PBE": "POT_GGA_PAW_PBE", "LDA": "POT_LDA_PAW",
-                      "PW91": "POT_GGA_PAW_PW91", "LDA_US": "POT_LDA_US"}
+    functional_dir = {"PBE": "POT_GGA_PAW_PBE",
+                      "PBE_52": "POT_GGA_PAW_PBE_52",
+                      "PBE_54": "POT_GGA_PAW_PBE_54",
+                      "LDA": "POT_LDA_PAW",
+                      "LDA_52": "POT_LDA_PAW_52",
+                      "LDA_54": "POT_LDA_PAW_54",
+                      "PW91": "POT_GGA_PAW_PW91",
+                      "LDA_US": "POT_LDA_US",
+                      "PW91_US": "POT_GGA_US_PW91"}
 
     functional_tags = {"pe": {"name": "PBE", "class": "GGA"},
                        "91": {"name": "PW91", "class": "GGA"},
@@ -1512,12 +1624,19 @@ class Potcar(list, MSONable):
     Args:
         symbols ([str]): Element symbols for POTCAR. This should correspond
             to the symbols used by VASP. E.g., "Mg", "Fe_pv", etc.
-        functional (str): Functional used.
+        functional (str): Functional used. To know what functional options
+            there are, use Potcar.FUNCTIONAL_CHOICES. Note that VASP has
+            different versions of the same functional. By default, the old
+            PBE functional is used. If you want the newer ones, use PBE_52 or
+            PBE_54. Note that if you intend to compare your results with the
+            Materials Project, you should use the default setting.
         sym_potcar_map (dict): Allows a user to specify a specific element
             symbol to raw POTCAR mapping.
     """
 
     DEFAULT_FUNCTIONAL = "PBE"
+
+    FUNCTIONAL_CHOICES = list(PotcarSingle.functional_dir.keys())
 
     def __init__(self, symbols=None, functional=DEFAULT_FUNCTIONAL,
                  sym_potcar_map=None):

@@ -1,16 +1,15 @@
 from __future__ import unicode_literals
 
-__author__ = ", ".join(["Shyue Ping Ong", "Anubhav Jain", "Geoffroy Hautier",
-                        "William Davidson Richard", "Stephen Dacek",
-                        "Sai Jayaraman", "Michael Kocher", "Dan Gunter",
-                        "Shreyas Cholia", "Vincent L Chevrier",
-                        "Rickard Armiento"])
-__date__ = "Oct 2 2015"
-__version__ = "3.2.3"
+__author__ = "Pymatgen Development Team"
+__email__ ="pymatgen@googlegroups.com"
+__maintainer__ = "Shyue Ping Ong"
+__maintainer_email__ ="shyuep@gmail.com"
+__date__ = "Apr 30 2016"
+__version__ = "3.5.2"
 
 
 # Useful aliases for commonly used objects and modules.
-# Allows from pymatgen import X for quick usage.
+# Allows from pymatgen import <class> for quick usage.
 
 from .core import *
 from .serializers.json_coders import pmg_dump, pmg_load

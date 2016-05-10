@@ -1,6 +1,147 @@
 Change log
 ==========
 
+v3.5.2
+------
+* Minor update to DerivedInputSet interface.
+
+v3.5.1
+------
+* New derived input sets for generating inputs that depende on previuos
+  calculations. Old input sets deprecated.
+
+v3.5.0
+------
+* Chemical environment analysis package (David Waroquiers).
+* Piezoelectric property analysis (Shayam).
+* Cythonize certain expensive core functions. 5-10x speedup in large structure matching (Will Richards).
+* New NMR parsing functionality for Outcar (Xiaohui Qu).
+* Improved io.lammps (Kiran Mathews).
+* Update to spglib 1.9.2.
+* Element properties now return unitized float where possible.
+* Bug fix for get_primitive_standard affecting rhombohedral cells (important for band structures).
+* Vasprun.final_energy now returns corrected energy with warning if it is different from final electronic step.
+
+v3.4.0
+------
+* 10-100x speed up to Structure copying and Site init, which means many
+  functionality has seen signifcant speed improvement (e.g., structure
+  matching).
+* Convenience method Structure.matches now perform similarity matching
+  for Structures.
+* Bugfix for band gap determination.
+
+v3.3.6
+------
+* Update to use enum.x instead of multienum.x.
+* Minor robustness fixes to VaspInputSet serialization.
+* Add a reciprocal density parameter to vasp sets.
+* Minor bug fixes to Vasprun parsing. 
+
+v3.3.5
+------
+* StructureMatcher can now work with ignored species.
+* Added interpolation failure warnings and smooth tolerance for
+  scipy.interpolate.splrep in bandstructures (Tess).
+* Added DiffusionAnalyzer.get_framework_rms_plot.
+* Complete rewrite of Procar class to use ND array access and zero-based
+  indexing.
+* OrderParameters class for analysis of local structural features
+  (Nils Zimmermann).
+* Bug fixes for Procar, MPRester and SpaceGroup 64.
+* Added Github templates for contributing to pymatgen.
+
+v3.3.4
+------
+* Procar now supports parsing of phase factors.
+* Miscellaneous bug fixes.
+
+v3.3.3
+------
+* Bug fixes for Poscar.
+* Fix Kpoints pickling.
+
+v3.3.2
+------
+* Bug fixes for pymatgen.io.abinit
+* Other minor big fixes.
+
+v3.3.1
+------
+* Minor bug fix release for pickle and elastic constants.
+
+v3.3.0
+------
+* Updated and checked for Python 3.5.* compatibility.
+* Element, Spin, Orbital and various other Enum-like classes are now actually
+  implemented using Enum (with enum34 dependency for Python < 3.4).
+* Speed up Site creation by 20% for ordered sites, with cost in terms of
+  slightly slower non-ordered Sites. Since ordered Sites is the far more common
+  case, this gives significant boost for large scale manipulations of
+  structures.
+* Alternative, more pythonic syntax for creating supercells via simply
+  Structure * 3 or Structure * (3, 1, 1).
+* zeo++ fixes.
+* More stable incar settings for MITMDVaspInputSet.
+
+v3.2.10
+-------
+* Fix missing scripts
+* Improvements to units module.
+* Speed up EwaldSummation.
+
+v3.2.9
+------
+* Major PD stability improvements, especially for very high dim hulls with lots
+  of entries.
+* Improvements to Ewald summation to be close to GULP implementation.
+* Deprecate physical constants module in favor of scipy's version.
+* Remove many pyhull references to use scipy's ConvexHull implementation.
+* Bug fix for sulfide correction.
+
+v3.2.8
+------
+
+* Make pyhull optional.
+* Sulfur correction added to MaterialsProjectCompatibility for more accurate
+  sulfide formation energies.
+* ADF io support. (Xin Chen)
+* Bug fixes for spacegroup subgroup testing.
+
+v3.2.7
+------
+* Add warning for limited subgroup testing functionality in Spacegroup.
+
+v3.2.6
+------
+* Extensive support for elasticity tensor analysis (Joseph Montoya).
+* Misc bug fixes and performance improvements.
+* Add support for QChem4.3 new format of Batch jobs
+
+v3.2.5
+------
+* Improved potcar setup via "pmg setup", with MAPI setup.
+* Support for new POTCARs issued by VASP.
+* Improvements to ABINIT support.
+* Improvement to Boltztrap support, e.g., scissor band gap, etc.
+* Vasprun now issues warning when unconverged run is detected.
+
+v3.2.4
+------
+
+* GaussianOutput can now parse frequencies, normal modes and cartesian forces
+  (Xin Chen).
+* Support for Aiida<->pymatgen conversion by the Aiida development team (Andrius
+  Merkys).
+* Specialized BSVasprun parser that is ~2-3x faster than Vasprun.
+* Refactor the boltztrap package (merge a few methods together) and add several
+  new methods (power factor, seebeck...)
+* Support of the new PCM format in QChem 4.3
+* Local environment analysis to pmg script.
+* Deprecate prettytable in favor of tabulate package.
+* Improvements to MITNEBVaspInputSet.
+* Misc bug fixes.
+
 v3.2.3
 ------
 * Massive update to abinit support. Note that pymatgen.io.abinitio has 

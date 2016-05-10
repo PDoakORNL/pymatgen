@@ -32,7 +32,7 @@ import itertools
 
 from monty.json import MontyEncoder, MontyDecoder
 
-from pymatgen.core.periodic_table import ALL_ELEMENT_SYMBOLS, Element
+from pymatgen.core.periodic_table import Element
 from pymatgen.core.composition import Composition
 from pymatgen.entries.computed_entries import ComputedEntry, \
     ComputedStructureEntry
@@ -84,7 +84,7 @@ class MPRester(object):
                             "e_above_hull", "hubbards", "is_compatible",
                             "spacegroup", "task_ids", "band_gap", "density",
                             "icsd_id", "icsd_ids", "cif", "total_magnetization",
-                            "material_id", "oxide_type", "tags")
+                            "material_id", "oxide_type", "tags", "elasticity")
 
     supported_task_properties = ("energy", "energy_per_atom", "volume",
                                  "formation_energy_per_atom", "nsites",
@@ -275,15 +275,16 @@ class MPRester(object):
         except Exception as ex:
             raise MPRestError(str(ex))
 
-    def get_entries(self, chemsys_formula_id, compatible_only=True,
+    def get_entries(self, chemsys_formula_id_criteria, compatible_only=True,
                     inc_structure=None, property_data=None):
         """
         Get a list of ComputedEntries or ComputedStructureEntries corresponding
-        to a chemical system, formula, or materials_id.
+        to a chemical system, formula, or materials_id or full criteria.
 
         Args:
-            chemsys_formula_id (str): A chemical system (e.g., Li-Fe-O),
-                or formula (e.g., Fe2O3) or materials_id (e.g., mp-1234).
+            chemsys_formula_id_criteria (str/dict): A chemical system
+                (e.g., Li-Fe-O), or formula (e.g., Fe2O3) or materials_id
+                (e.g., mp-1234) or full Mongo-style dict criteria.
             compatible_only (bool): Whether to return only "compatible"
                 entries. Compatible entries are entries that have been
                 processed using the MaterialsProjectCompatibility class,
@@ -316,7 +317,10 @@ class MPRester(object):
                 else:
                     props.append("initial_structure")
 
-            criteria = MPRester.parse_criteria(chemsys_formula_id)
+            if not isinstance(chemsys_formula_id_criteria, dict):
+                criteria = MPRester.parse_criteria(chemsys_formula_id_criteria)
+            else:
+                criteria = chemsys_formula_id_criteria
 
             data = self.query(criteria, props)
 
@@ -344,7 +348,8 @@ class MPRester(object):
             entries = MaterialsProjectCompatibility().process_entries(entries)
         else:
             entries = []
-            for d in self.get_data(chemsys_formula_id, prop="task_ids"):
+            for d in self.get_data(chemsys_formula_id_criteria,
+                                   prop="task_ids"):
                 for i in d["task_ids"]:
                     e = self.get_task_data(i, prop="entry")
                     e = e[0]["entry"]
@@ -885,7 +890,7 @@ class MPRester(object):
 
         def parse_sym(sym):
             if sym == "*":
-                return ALL_ELEMENT_SYMBOLS
+                return [el.symbol for el in Element]
             else:
                 m = re.match("\{(.*)\}", sym)
                 if m:
@@ -974,4 +979,3 @@ class MPDecoder(MontyDecoder):
             return {self.process_decoded(k): self.process_decoded(v)
                     for k, v in d.items()}
         return MontyDecoder.process_decoded(self, d)
-
