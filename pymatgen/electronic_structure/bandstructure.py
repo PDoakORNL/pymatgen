@@ -186,6 +186,9 @@ class BandStructure(object):
             #let see if this kpoint has been assigned a label
             label = None
             for c in labels_dict:
+                invL = np.linalg.inv(self._lattice_rec._matrix)
+                kpointCartLattice = np.dot(invL,k)
+                print kpointCartLattice
                 if np.linalg.norm(k - np.array(labels_dict[c])) < 0.0001:
                     label = c
                     self._labels_dict[label] = Kpoint(
